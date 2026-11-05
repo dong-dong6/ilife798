@@ -8,7 +8,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 
 internal const val CHANNEL_DEVICE = "device_running"
-internal const val CHANNEL_TASK = "task_running"
 
 internal fun ensureRunChannels(context: Context) {
     val manager = context.getSystemService(NotificationManager::class.java) ?: return
@@ -20,18 +19,6 @@ internal fun ensureRunChannels(context: Context) {
                 NotificationManager.IMPORTANCE_DEFAULT,
             ).apply {
                 description = "设备运行期间显示运行状态与停止操作"
-                setShowBadge(false)
-            },
-        )
-    }
-    if (manager.getNotificationChannel(CHANNEL_TASK) == null) {
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_TASK,
-                "积分任务运行状态",
-                NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply {
-                description = "积分任务运行期间显示已获得积分与停止操作"
                 setShowBadge(false)
             },
         )

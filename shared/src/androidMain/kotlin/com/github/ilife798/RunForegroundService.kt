@@ -13,7 +13,7 @@ import android.os.PowerManager
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 
-// 设备/积分任务运行期间维持前台服务并持有 Partial WakeLock，
+// 设备运行期间维持前台服务并持有 Partial WakeLock，
 // 避免锁屏或切到后台后进程被厂商省电策略冻结、网络请求被中断。
 // 前台服务通知直接复用运行通知（含实时动态），由 [RunNotifications] 通过 Intent 传入。
 class RunForegroundService : Service() {

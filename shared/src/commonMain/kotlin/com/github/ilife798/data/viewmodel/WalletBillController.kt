@@ -3,23 +3,12 @@ package com.github.ilife798.data.viewmodel
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import com.github.ilife798.data.api.DevResult
 import com.github.ilife798.data.api.IlifeApi
 import com.github.ilife798.data.model.AppState
 import com.github.ilife798.data.model.BillDetailInfo
 import com.github.ilife798.data.model.BillRecord
-import com.github.ilife798.data.model.PayChannel
-import com.github.ilife798.data.model.PayChannelType
-import com.github.ilife798.data.model.PendingRecharge
-import com.github.ilife798.data.model.RechargeProduct
-import com.github.ilife798.data.model.RefundProgress
 import com.github.ilife798.data.model.SpendingStats
 import com.github.ilife798.data.model.WalletAccount
-import com.github.ilife798.pay.AlipayPayResult
-import com.github.ilife798.pay.isWeChatPayAvailable
-import com.github.ilife798.pay.payWithAlipay
-import com.github.ilife798.pay.payWithOneCard
-import com.github.ilife798.pay.payWithWeChat
 import com.github.ilife798.util.currentTimeFormatted
 import com.github.ilife798.util.currentTimeMillis
 import com.github.ilife798.util.formatTimestamp
@@ -29,7 +18,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonPrimitive
 
 private const val BILL_PAGE_SIZE = 200
 private const val BILL_STATUS = 3
@@ -57,29 +45,7 @@ class WalletBillController(
     var billRefreshing by mutableStateOf(false)
         private set
 
-    var refundProgress by mutableStateOf<RefundProgress?>(null)
-        private set
-
     var spendingStats by mutableStateOf(SpendingStats())
-        private set
-
-    var rechargeProducts by mutableStateOf<List<RechargeProduct>>(emptyList())
-        private set
-    var rechargeLoading by mutableStateOf(false)
-        private set
-    var rechargePaying by mutableStateOf(false)
-        private set
-
-    /**
-     * 待支付订单。
-     *
-     * 渠道查询必须带账单 ID，所以流程拆成两步：先下单拿到 [PendingRecharge]，
-     * 把渠道列表展示给用户选择，选定后再用它去拉预支付串。
-     */
-    var pendingRecharge by mutableStateOf<PendingRecharge?>(null)
-        private set
-
-    var refundSubmitting by mutableStateOf(false)
         private set
 
     private data class BillCacheEntry(
@@ -99,139 +65,6 @@ class WalletBillController(
 
     private fun currentToken(): String = getState().account.preferredToken
 
-    /**
-     * 第一步：下单并查可用渠道。
-     *
-     * 成功则把订单与渠道放进 [pendingRecharge] 供界面弹出选择框；失败返回错误文案。
-     */
-    suspend fun startRecharge(product: RechargeProduct): String? {
-        val token = currentToken()
-        val wallet = getState().wallets.firstOrNull { it.id == getState().activeWalletId }
-        if (token.isEmpty() || wallet == null || wallet.eid.isEmpty() || wallet.ownerId.isEmpty()) {
-            return "钱包信息缺失，请重新进入"
-        }
-        if (rechargePaying) return "正在支付中，请稍候"
-        rechargePaying = true
-        return try {
-            val orderId =
-                api.createRechargeOrder(token, wallet.eid, wallet.ownerId, product.id)
-                    ?: return ""
-            // 渠道查询失败不阻断充值：回退到一直可用的支付宝
-            val raw =
-                api.getPayChannels(token, orderId)
-                    ?: listOf(PayChannel(PayChannelType.ALIPAY_APP, "支付宝（APP）"))
-            val channels = markChannelAvailability(raw)
-            if (channels.none { !it.unavailable }) return "没有可用的支付方式"
-            pendingRecharge =
-                PendingRecharge(
-                    orderId = orderId,
-                    token = token,
-                    amount = product.price,
-                    channels = channels,
-                )
-            null
-        } catch (e: Exception) {
-            "支付失败：${e.message}"
-        } finally {
-            rechargePaying = false
-        }
-    }
-
-    /**
-     * 标出哪些渠道真机拉得起来。
-     *
-     * 微信先看平台能力（[isWeChatPayAvailable]）：本端 applicationId 与签名没在微信开放平台登记，
-     * 拉不起收银台，恒为 false，因此这里只保留灰条、不再发探测请求。
-     * 探测接口 [com.github.ilife798.data.api.IlifeApi.probeWeChatPay] 留着，等资质补上再用。
-     */
-    private fun markChannelAvailability(channels: List<PayChannel>): List<PayChannel> {
-        if (isWeChatPayAvailable()) return channels
-        return channels.map { channel ->
-            if (channel.type != PayChannelType.WECHAT_APP || channel.unavailable) {
-                return@map channel
-            }
-            channel.copy(
-                unavailable = true,
-                name =
-                    if (channel.name.endsWith(PayChannelType.UNAVAILABLE_SUFFIX)) {
-                        channel.name
-                    } else {
-                        channel.name + PayChannelType.UNAVAILABLE_SUFFIX
-                    },
-            )
-        }
-    }
-
-    /**
-     * 第二步：用户选定的渠道去拉预支付串并唤起对应收银台。
-     *
-     * 各渠道的预支付串形态不同，因此必须按 [payType] 分派：
-     * - 21 支付宝：`data` 是 orderInfo，交给支付宝 SDK `PayTask.payV2`
-     * - 93 一卡通：`data` 是 sign_params，交给支付宝 SDK `OpenAuthTask`
-     * - 11 微信：`data` 是 `PayInfo` JSON 对象，交给微信 SDK `PayReq`
-     * - 91 商家钱包：纯服务端扣款，预支付成功即完成，直接刷新余额与账单
-     */
-    suspend fun payRecharge(payType: Int): AlipayPayResult {
-        val pending = pendingRecharge ?: return AlipayPayResult(false, "")
-        if (payType !in PayChannelType.SUPPORTED) {
-            return AlipayPayResult(false, "该支付方式暂不可用")
-        }
-        if (rechargePaying) return AlipayPayResult(false, "正在支付中，请稍候")
-        rechargePaying = true
-        return try {
-            val data =
-                api.prepay(pending.token, pending.orderId, payType)
-                    ?: return AlipayPayResult(false, "获取预支付信息失败，请稍后重试")
-            val result =
-                when (payType) {
-                    PayChannelType.WALLET -> {
-                        AlipayPayResult(true, "支付成功")
-                    }
-
-                    PayChannelType.ALIPAY_APP -> {
-                        val orderInfo = (data as? JsonPrimitive)?.content
-                        if (orderInfo.isNullOrEmpty()) {
-                            AlipayPayResult(false, "获取支付参数失败，请稍后重试")
-                        } else {
-                            payWithAlipay(orderInfo)
-                        }
-                    }
-
-                    PayChannelType.THIRD -> {
-                        val signParams = (data as? JsonPrimitive)?.content
-                        if (signParams.isNullOrEmpty()) {
-                            AlipayPayResult(false, "获取一卡通授权参数失败，请稍后重试")
-                        } else {
-                            payWithOneCard(signParams)
-                        }
-                    }
-
-                    PayChannelType.WECHAT_APP -> {
-                        payWithWeChat(data.toString())
-                    }
-
-                    else -> {
-                        AlipayPayResult(false, "该支付方式暂不可用")
-                    }
-                }
-            if (result.success) {
-                loadWallet()
-                loadBillsNoCooldown()
-            }
-            result
-        } catch (e: Exception) {
-            AlipayPayResult(false, "支付失败：${e.message}")
-        } finally {
-            rechargePaying = false
-            pendingRecharge = null
-        }
-    }
-
-    fun dismissRecharge() {
-        if (!rechargePaying) pendingRecharge = null
-    }
-
-    // 账单详情（bill/view-full）；网络异常返回 null 由页面展示失败态
     suspend fun getBillDetail(billId: String): BillDetailInfo? {
         val token = currentToken()
         if (token.isEmpty()) return null
@@ -247,8 +80,6 @@ class WalletBillController(
 
     fun reset() {
         clearBillPaging()
-        rechargeProducts = emptyList()
-        refundProgress = null
         spendingStats = SpendingStats()
         lastSpendingLoadTime = 0L
     }
@@ -282,7 +113,6 @@ class WalletBillController(
                     active?.id?.takeIf { it.isNotEmpty() }
                         ?: wallets.firstOrNull()?.id ?: ""
                 setState { it.copy(wallets = wallets, activeWalletId = activeId) }
-                refundProgress = result.refundProgress
                 wallets.firstOrNull { it.id == activeId }?.let { loadWalletDetail(it) }
             } catch (e: Exception) {
                 onLogError("loadWallet", e)
@@ -325,7 +155,6 @@ class WalletBillController(
 
     fun selectWallet(id: String) {
         if (getState().activeWalletId == id) return
-        rechargeProducts = emptyList()
         setState { it.copy(activeWalletId = id) }
         getState().wallets.firstOrNull { it.id == id }?.let { loadWalletDetail(it) }
     }
@@ -485,50 +314,6 @@ class WalletBillController(
             } catch (e: Exception) {
                 onLogError("loadSpendingStats", e)
             }
-        }
-    }
-
-    fun loadRechargeProducts() {
-        val token = currentToken()
-        val wallet = getState().wallets.firstOrNull { it.id == getState().activeWalletId }
-        if (token.isEmpty() || wallet == null || wallet.eid.isEmpty()) return
-        rechargeLoading = true
-        scope.launch {
-            try {
-                val products = api.getRechargeProducts(token, wallet.eid)
-                if (currentToken() != token || getState().activeWalletId != wallet.id) return@launch
-                rechargeProducts = products
-            } catch (e: Exception) {
-                onLogError("loadRechargeProducts", e)
-            } finally {
-                rechargeLoading = false
-            }
-        }
-    }
-
-    suspend fun submitRefund(): DevResult {
-        val token = currentToken()
-        val wallet =
-            getState().wallets.firstOrNull { it.id == getState().activeWalletId }
-                ?: return DevResult(false, -1, "钱包信息缺失，请重新进入")
-        if (wallet.eid.isEmpty()) return DevResult(false, -1, "钱包信息缺失，请重新进入")
-        if (wallet.refundable <= 0.0) return DevResult(false, -1, "可退金额为0，无法退款")
-        if (refundSubmitting) return DevResult(false, -1, "正在提交退款，请稍候")
-        refundSubmitting = true
-        return try {
-            val result = api.refundWallet(token, wallet.eid)
-            if (result.success) {
-                loadWallet()
-                loadBillsNoCooldown()
-                result
-            } else {
-                // 错误信息由 API 层上报，返回值不再重复携带
-                DevResult(false, result.code, "")
-            }
-        } catch (e: Exception) {
-            DevResult(false, -1, "退款失败：${e.message}")
-        } finally {
-            refundSubmitting = false
         }
     }
 }

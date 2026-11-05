@@ -40,25 +40,13 @@ fun resolveIosBuildConfig(
 }
 
 val iosApiGateway = resolveIosBuildConfig("ILIFE798_API_GATEWAY", "API_GATEWAY")
-val iosSignSalt = resolveIosBuildConfig("ILIFE798_SIGN_SALT", "SIGN_SALT")
-val iosApiCid = resolveIosBuildConfig("ILIFE798_API_CID", "API_CID")
-val iosAppSignSalt = resolveIosBuildConfig("ILIFE798_APP_SIGN_SALT", "APP_SIGN_SALT")
-val iosMiniSignSalt = resolveIosBuildConfig("ILIFE798_MINI_SIGN_SALT", "MINI_SIGN_SALT")
 
 val generateIosBuildConfig =
     tasks.register("generateIosBuildConfig") {
         description = "生成 iOS 构建期常量（网关/签名盐/CID）"
         val generatedDir = layout.buildDirectory.dir("generated/iosBuildConfig/kotlin")
         val apiGateway = iosApiGateway
-        val signSalt = iosSignSalt
-        val apiCid = iosApiCid
-        val appSignSalt = iosAppSignSalt
-        val miniSignSalt = iosMiniSignSalt
         inputs.property("apiGateway", apiGateway)
-        inputs.property("signSalt", signSalt)
-        inputs.property("apiCid", apiCid)
-        inputs.property("appSignSalt", appSignSalt)
-        inputs.property("miniSignSalt", miniSignSalt)
         outputs.dir(generatedDir)
         doLast {
             // Kotlin 字符串字面量转义：保证网关/盐值中的 $、"、\ 不破坏生成代码。
@@ -78,10 +66,6 @@ val generateIosBuildConfig =
                 |// 由 Gradle 任务 generateIosBuildConfig 生成，勿手动修改，不入库。
                 |object IosBuildConfig {
                 |    const val API_GATEWAY: String = "${escapeKotlinStringLiteral(apiGateway)}"
-                |    const val SIGN_SALT: String = "${escapeKotlinStringLiteral(signSalt)}"
-                |    const val API_CID: String = "${escapeKotlinStringLiteral(apiCid)}"
-                |    const val APP_SIGN_SALT: String = "${escapeKotlinStringLiteral(appSignSalt)}"
-                |    const val MINI_SIGN_SALT: String = "${escapeKotlinStringLiteral(miniSignSalt)}"
                 |}
                 """.trimMargin(),
             )

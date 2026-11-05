@@ -4,7 +4,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.github.ilife798.AppLifecycle
@@ -14,13 +13,10 @@ import com.github.ilife798.DeviceWidgetResult
 import com.github.ilife798.DeviceWidgetTarget
 import com.github.ilife798.DeviceWidgets
 import com.github.ilife798.StorageKeys
-import com.github.ilife798.data.api.DevResult
 import com.github.ilife798.data.api.IlifeApi
 import com.github.ilife798.data.api.ScoreDto
 import com.github.ilife798.data.api.TokenPlatform
 import com.github.ilife798.data.api.TokenProbe
-import com.github.ilife798.data.api.int
-import com.github.ilife798.data.api.str
 import com.github.ilife798.data.model.Account
 import com.github.ilife798.data.model.AccountEntry
 import com.github.ilife798.data.model.AccountInfo
@@ -29,7 +25,6 @@ import com.github.ilife798.data.model.BackupDocument
 import com.github.ilife798.data.model.BackupGroup
 import com.github.ilife798.data.model.BackupOption
 import com.github.ilife798.data.model.BillDetailInfo
-import com.github.ilife798.data.model.CloudCard
 import com.github.ilife798.data.model.DEFAULT_SEED_COLOR
 import com.github.ilife798.data.model.Device
 import com.github.ilife798.data.model.DeviceAliases
@@ -39,12 +34,8 @@ import com.github.ilife798.data.model.HomeDeviceType
 import com.github.ilife798.data.model.ImportApplyOutcome
 import com.github.ilife798.data.model.ImportMergeResult
 import com.github.ilife798.data.model.ImportPreview
-import com.github.ilife798.data.model.MissionInfo
 import com.github.ilife798.data.model.PaletteStyle
-import com.github.ilife798.data.model.PendingRecharge
 import com.github.ilife798.data.model.PointsInfo
-import com.github.ilife798.data.model.RechargeProduct
-import com.github.ilife798.data.model.RefundProgress
 import com.github.ilife798.data.model.ScoreFilter
 import com.github.ilife798.data.model.ScoreRecord
 import com.github.ilife798.data.model.SpendingStats
@@ -58,11 +49,9 @@ import com.github.ilife798.data.model.toBackupAccount
 import com.github.ilife798.dismissToast
 import com.github.ilife798.isIOS
 import com.github.ilife798.logDebug
-import com.github.ilife798.pay.AlipayPayResult
 import com.github.ilife798.showToast
 import com.github.ilife798.supportsDynamicColor
 import com.github.ilife798.supportsPredictiveBack
-import com.github.ilife798.toImageBitmap
 import com.github.ilife798.update.UpdateController
 import com.github.ilife798.update.UpdateDialogState
 import com.github.ilife798.util.SPONSOR_URL
@@ -75,7 +64,6 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.jsonObject
 import top.yukonga.miuix.kmp.shader.isRuntimeShaderSupported
 import kotlin.time.Duration.Companion.milliseconds
 
@@ -163,33 +151,6 @@ class AppViewModel : ViewModel() {
             getState = { state },
             setState = { transform -> state = transform(state) },
             onLogError = ::logError,
-        )
-
-    // 云卡卡包（见 CardController）
-    private val card =
-        CardController(
-            scope = viewModelScope,
-            apiProvider = { api },
-            getState = { state },
-            onToast = ::showToast,
-            onLogError = ::logError,
-            onSessionExpired = { handleSessionExpired() },
-        )
-
-    // 积分任务（见 TaskController）
-    private val task =
-        TaskController(
-            scope = viewModelScope,
-            apiProvider = { api },
-            getState = { state },
-            setState = { transform -> state = transform(state) },
-            getLoading = { isLoading },
-            onLoadingChange = { isLoading = it },
-            onError = { errorMessage = it },
-            onToast = ::showToast,
-            onLogError = ::logError,
-            onResetScoreCooldown = { lastScoreLoadTime = 0L },
-            onReloadScores = { loadScoreInfo() },
         )
 
     init {
@@ -400,7 +361,6 @@ class AppViewModel : ViewModel() {
         loadAccountInfo()
         loadScoreInfo()
         wallet.loadSpendingStats()
-        task.loadMissions()
     }
 
     // 从小组件进入时先恢复绑定账号，避免将另一账号误用于设备操作。
@@ -575,11 +535,11 @@ class AppViewModel : ViewModel() {
                 notice = "检测为设备登录信息，已填入设备控制"
             } else if (probe.platform == TokenPlatform.MAIN && field != "token") {
                 if (acc.token.isNotEmpty()) {
-                    showToast("检测为积分登录信息，但积分任务已有登录信息，未保存")
+                    showToast("检测为积分登录信息，但积分查询已有登录信息，未保存")
                     return@launch
                 }
                 target = "token"
-                notice = "检测为积分登录信息，已填入积分任务"
+                notice = "检测为积分登录信息，已填入积分查询"
             }
             // 同一账户校验：与另一槽已有凭据比对 uid；任一侧 uid 无法取得时无法确认归属，拒绝保存
             val otherToken = if (target == "appToken") acc.token else acc.appToken
@@ -615,55 +575,8 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    // 账号管理页：修改昵称，成功后立即刷新本地资料缓存
-    suspend fun modifyAccountName(name: String): DevResult {
-        val input = name.trim()
-        if (input.isEmpty()) return DevResult(false, -1, "昵称不能为空")
-        val token = currentToken()
-        if (token.isEmpty()) return DevResult(false, -99, "登录已过期，请重新登录")
-        return try {
-            val result = api.modifyName(token, input)
-            if (result.success) {
-                state = state.copy(accountInfo = state.accountInfo.copy(name = input))
-                saveAccount()
-                // 让「我的」页与账号列表都取到新昵称，冷却时间不能挡住这次刷新
-                lastAccountLoadTime = 0L
-                loadAccountInfo()
-                showToast("修改昵称成功")
-            }
-            result
-        } catch (e: Exception) {
-            logError("modifyAccountName", e)
-            DevResult(false, -1, "网络异常，请稍后再试")
-        }
-    }
-
-    // 账号管理页：修改交易密码。官方分两步，先校验原密码再写新密码
-    suspend fun changePayPassword(
-        oriPayPwd: String,
-        newPayPwd: String,
-    ): DevResult {
-        val ori = oriPayPwd.trim()
-        val next = newPayPwd.trim()
-        if (ori.isEmpty()) return DevResult(false, -1, "原密码不能为空")
-        if (next.isEmpty()) return DevResult(false, -1, "新密码不能为空")
-        if (ori == next) return DevResult(false, -1, "新密码不能与原密码相同")
-        val token = currentToken()
-        if (token.isEmpty()) return DevResult(false, -99, "登录已过期，请重新登录")
-        return try {
-            val verify = api.verifyPayPwd(token, ori)
-            if (!verify.success) return verify.copy(message = verify.message.ifEmpty { "原密码不正确" })
-            val result = api.changePayPwd(token, ori, next)
-            if (result.success) showToast("交易密码修改成功")
-            result
-        } catch (e: Exception) {
-            logError("changePayPassword", e)
-            DevResult(false, -1, "网络异常，请稍后再试")
-        }
-    }
-
-    // 账户凭证登录：按槽位直接填写两条登录信息，设备控制必填、积分任务可选
-    // 与验证码登录的区别是跳过短信流程，改由客户端校验凭据有效性后直接入列
+    // 账户凭证登录：按槽位直接填写两条登录信息，设备控制必填、积分查询可选
+    // 本机校验凭据有效性后保存到账号列表。
     fun loginWithCredentials(
         appToken: String,
         mainToken: String,
@@ -684,10 +597,10 @@ class AppViewModel : ViewModel() {
                     showToast("设备控制登录信息无效，未保存")
                     return@launch
                 }
-                // 积分任务槽位：填了才校验
+                // 积分查询槽位：填了才校验
                 val pointsProbe = if (pointsToken.isEmpty()) null else probeTokenOrNull(pointsToken)
                 if (pointsToken.isNotEmpty() && pointsProbe == null) {
-                    showToast("积分任务登录信息无效，未保存")
+                    showToast("积分查询登录信息无效，未保存")
                     return@launch
                 }
                 // 两条凭据必须属于同一账户，否则会写出一个不存在的混合身份。
@@ -716,7 +629,7 @@ class AppViewModel : ViewModel() {
                 )
                 saveAccount()
                 reloadAccountData()
-                showToast(if (pointsProbe != null) "登录成功" else "设备控制登录成功，积分任务未填写")
+                showToast(if (pointsProbe != null) "登录成功" else "设备控制登录成功，积分查询未填写")
             } catch (e: Exception) {
                 val msg = "登录失败: ${e.message}"
                 errorMessage = msg
@@ -733,134 +646,9 @@ class AppViewModel : ViewModel() {
             api.probeToken(token).takeIf { it.appValid || it.mainValid }
         }
 
-    // 验证码
-    var captchaKey by mutableStateOf("")
-        private set
-
-    var captchaImage by mutableStateOf<ImageBitmap?>(null)
-        private set
-
-    fun loadCaptcha(clearError: Boolean = true) {
-        viewModelScope.launch {
-            isLoading = true
-            if (clearError) errorMessage = null
-            smsSent = false
-            try {
-                val key = api.newCaptchaKey()
-                captchaKey = key
-                val bytes = api.getCaptcha(key)
-                captchaImage = bytes.toImageBitmap()
-            } catch (e: Exception) {
-                logError("loadCaptcha", e)
-                errorMessage = "获取图形验证码失败: ${e.message}"
-            } finally {
-                isLoading = false
-            }
-        }
-    }
-
-    // 登录
-    var smsSent by mutableStateOf(false)
-        private set
-
-    // 发送验证码成功次数：驱动界面仅在成功后进入倒计时
-    var smsSendSuccessTick by mutableIntStateOf(0)
-        private set
-
-    fun sendSmsCode(
-        phone: String,
-        graphCode: String,
-        isAlipay: Boolean = false,
-    ) {
-        viewModelScope.launch {
-            isLoading = true
-            errorMessage = null
-            try {
-                val response = api.sendSmsCode(phone, graphCode, captchaKey, isAlipay)
-                val json = Json { ignoreUnknownKeys = true }
-                val obj = json.parseToJsonElement(response).jsonObject
-                val code = obj.int("code", -1)
-                if (code == 0) {
-                    smsSent = true
-                    smsSendSuccessTick++
-                    showToast("验证码已发送")
-                } else {
-                    val msg = obj.str("msg", "发送验证码失败")
-                    errorMessage = msg
-                    showToast(msg)
-                    loadCaptcha(clearError = false)
-                }
-            } catch (e: Exception) {
-                val msg = "发送验证码失败: ${e.message}"
-                errorMessage = msg
-                showToast(msg)
-                loadCaptcha(clearError = false)
-            } finally {
-                isLoading = false
-            }
-        }
-    }
-
-    fun resetCaptcha() {
-        captchaKey = ""
-        captchaImage = null
-        smsSent = false
-    }
-
-    fun login(
-        phone: String,
-        smsCode: String,
-        isAlipay: Boolean,
-    ) {
-        viewModelScope.launch {
-            isLoading = true
-            errorMessage = null
-            try {
-                val result = api.login(phone, smsCode, isAlipay)
-                if (result.success) {
-                    clearAccountData()
-                    val prev = state.account
-                    // 身份不同则不继承旧凭据，作为新账号入列
-                    val sameIdentity =
-                        (prev.uid.isNotEmpty() && prev.uid == result.uid) || (prev.phone.isNotEmpty() && prev.phone == phone)
-                    val base = if (sameIdentity) prev else Account()
-                    selectAccount(
-                        base.copy(
-                            phone = phone,
-                            isLoggedIn = true,
-                            pointsLoginDone = if (isAlipay) true else base.pointsLoginDone,
-                            uid = result.uid.ifEmpty { base.uid },
-                            token = if (isAlipay) result.token else base.token,
-                            appToken = if (!isAlipay) result.token else base.appToken,
-                        ),
-                    )
-                    device.loadDeviceInfo()
-                    loadAccountInfo()
-                    if (isAlipay) loadScoreInfo()
-                    wallet.loadSpendingStats()
-                    task.loadMissions()
-                    resetCaptcha()
-                    saveAccount()
-                    showToast("登录成功")
-                } else {
-                    errorMessage = result.error
-                    showToast(result.error.ifEmpty { "登录失败" })
-                }
-            } catch (e: Exception) {
-                val msg = "登录失败: ${e.message}"
-                errorMessage = msg
-                showToast(msg)
-            } finally {
-                isLoading = false
-            }
-        }
-    }
-
     private fun clearAccountData() {
-        task.reset()
         device.reset()
         wallet.reset()
-        card.reset()
         scoreLists = emptyScoreLists()
         scoreFilter = ScoreFilter.All
         lastScoreLoadTime = 0L
@@ -873,9 +661,6 @@ class AppViewModel : ViewModel() {
                 wallets = emptyList(),
                 activeWalletId = "",
                 billRecords = emptyList(),
-                taskLogs = emptyList(),
-                taskCompleted = false,
-                weekMask = 0,
             )
     }
 
@@ -886,7 +671,6 @@ class AppViewModel : ViewModel() {
 
     private fun clearLoginState() {
         clearAccountData()
-        resetCaptcha()
         isLoading = false
         errorMessage = null
         // 退出登录：从列表移除当前账号并回到未登录，其余账号保留
@@ -1265,14 +1049,14 @@ class AppViewModel : ViewModel() {
         if (token.isEmpty()) return null
         return viewModelScope.launch {
             try {
-                val result = api.getMissionList(token, token == state.account.appToken)
+                val result = api.getPointsSummary(token, token == state.account.appToken)
                 if (currentToken() != token) return@launch
                 state =
                     state.copy(
                         points =
                             state.points.copy(
-                                available = result.validScore ?: state.points.available,
-                                total = result.totalScore ?: state.points.total,
+                                available = result.available ?: state.points.available,
+                                total = result.total ?: state.points.total,
                             ),
                     )
             } catch (e: Exception) {
@@ -1308,47 +1092,11 @@ class AppViewModel : ViewModel() {
         }
     }
 
-    // 积分兑换
-    var exchangeSubmitting by mutableStateOf(false)
-        private set
-
-    suspend fun submitScoreExchange(score: Int): DevResult {
-        val token = currentToken()
-        val activeWallet = state.wallets.firstOrNull { it.id == state.activeWalletId }
-        if (token.isEmpty() || activeWallet == null || activeWallet.eid.isEmpty()) {
-            return DevResult(false, -1, "钱包信息缺失，请重新进入")
-        }
-        exchangeSubmitting = true
-        return try {
-            val billId =
-                api.exchangeScore(token, activeWallet.eid, score)
-                    ?: return DevResult(false, -1, "")
-            val completed = api.isExchangeBillCompleted(token, billId)
-            wallet.loadWallet()
-            refreshScorePage()
-            if (completed) {
-                DevResult(true, 0, "兑换已完成，已兑换至「${activeWallet.name}」")
-            } else {
-                DevResult(false, -1, "兑换结果待确认，请先核对官方记录，勿重复兑换")
-            }
-        } catch (e: Exception) {
-            DevResult(false, -1, "兑换失败：${e.message}")
-        } finally {
-            exchangeSubmitting = false
-        }
-    }
-
     val billLoadingMore: Boolean by wallet::billLoadingMore
     val billHasMore: Boolean by wallet::billHasMore
     val billStatus: Int by wallet::billStatus
     val billRefreshing: Boolean by wallet::billRefreshing
-    val refundProgress: RefundProgress? by wallet::refundProgress
     val spendingStats: SpendingStats by wallet::spendingStats
-    val rechargeProducts: List<RechargeProduct> by wallet::rechargeProducts
-    val rechargeLoading: Boolean by wallet::rechargeLoading
-    val rechargePaying: Boolean by wallet::rechargePaying
-    val pendingRecharge: PendingRecharge? by wallet::pendingRecharge
-    val refundSubmitting: Boolean by wallet::refundSubmitting
 
     fun loadWallet(): Job? = wallet.loadWallet()
 
@@ -1365,71 +1113,6 @@ class AppViewModel : ViewModel() {
     suspend fun getBillDetail(billId: String): BillDetailInfo? = wallet.getBillDetail(billId)
 
     fun loadSpendingStats(force: Boolean = false): Job? = wallet.loadSpendingStats(force)
-
-    fun loadRechargeProducts() = wallet.loadRechargeProducts()
-
-    suspend fun startRecharge(product: RechargeProduct): String? = wallet.startRecharge(product)
-
-    suspend fun payRecharge(payType: Int): AlipayPayResult = wallet.payRecharge(payType)
-
-    fun dismissRecharge() = wallet.dismissRecharge()
-
-    suspend fun submitRefund(): DevResult = wallet.submitRefund()
-
-    val cards: List<CloudCard> by card::cards
-    val cardsLoading: Boolean by card::loading
-    val cardsLoaded: Boolean by card::loaded
-
-    fun loadCards(force: Boolean = false): Job? = card.loadCards(force)
-
-    fun bindCard(
-        cardId: String,
-        cardKey: String = "",
-        name: String = "",
-        onSuccess: () -> Unit = {},
-        onSettled: () -> Unit = {},
-    ) = card.bindCard(cardId, cardKey, name, onSuccess, onSettled)
-
-    fun updateCard(
-        cardId: String,
-        name: String,
-        limit: Double,
-        otherEp: Int,
-    ) = card.updateCard(cardId, name, limit, otherEp)
-
-    fun unbindCard(cardId: String) = card.unbindCard(cardId)
-
-    fun activateCard(cardId: String) = card.activateCard(cardId)
-
-    // 待补填绑卡密钥的卡号；非空表示服务端要求该卡提供密钥
-    val pendingCardKeyId: String by card::pendingCardKeyId
-
-    // 用户放弃补填绑卡密钥时复位，避免状态残留给下一张卡
-    fun clearPendingCardKey() = card.clearPendingCardKey()
-
-    // 扫码得到的原始文本，跨导航存活；卡包页消费后复位
-    val scannedCardRaw: String by card::scannedCardRaw
-
-    fun clearScannedCardRaw() = card.clearScannedRaw()
-
-    // 扫码页回传：只登记原文，绑定由卡包页的对话框统一提交
-    fun submitCardScannedRaw(raw: String) = card.submitScannedRaw(raw)
-
-    val missions: List<MissionInfo> by task::missions
-    val tasksRefreshing: Boolean by task::tasksRefreshing
-    val allTasksCompleted: Boolean get() = task.areAllTasksCompleted()
-
-    fun loadMissions() = task.loadMissions()
-
-    fun runTasksFromShortcut() = task.runFromShortcut()
-
-    fun runAllTasks() = task.runAll()
-
-    fun stopTasks() = task.stop()
-
-    fun setTaskCompleted() = task.setCompleted()
-
-    fun refreshTasks() = task.refresh()
 
     // 设置
     fun setDynamicColor(enabled: Boolean) {

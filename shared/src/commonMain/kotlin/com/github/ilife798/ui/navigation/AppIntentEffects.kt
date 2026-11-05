@@ -55,22 +55,12 @@ fun AppIntentEffects(
         AppRequests.startDevice.consume()
     }
 
-    // 桌面快捷方式“运行积分任务”：跳转到任务页并开始运行
-    val runTasksRequestId = AppRequests.runTasks.id
-    LaunchedEffect(runTasksRequestId) {
-        if (runTasksRequestId <= 0) return@LaunchedEffect
-        clearToRoot()
-        mainPagerState.animateToPage(1)
-        viewModel.runTasksFromShortcut()
-        AppRequests.runTasks.consume()
-    }
-
     // 点击“正在下载”通知：回到“我的”页并重新弹出下载对话框
     val updateRequestId = AppRequests.showUpdate.id
     LaunchedEffect(updateRequestId) {
         if (updateRequestId <= 0) return@LaunchedEffect
         clearToRoot()
-        mainPagerState.animateToPage(2)
+        mainPagerState.animateToPage(1)
         viewModel.reopenUpdateProgressDialog()
         AppRequests.showUpdate.consume()
     }
@@ -92,24 +82,5 @@ fun AppIntentEffects(
         mainPagerState.animateToPage(0)
         viewModel.stopDevice(id)
         AppRequests.stopDevice.consume()
-    }
-
-    // 点击积分任务通知正文：跳转到任务页
-    val openTasksRequestId = AppRequests.openTasks.id
-    LaunchedEffect(openTasksRequestId) {
-        if (openTasksRequestId <= 0) return@LaunchedEffect
-        clearToRoot()
-        mainPagerState.animateToPage(1)
-        AppRequests.openTasks.consume()
-    }
-
-    // 点击积分任务通知“停止”按钮：跳转到任务页并停止任务
-    val stopTasksRequestId = AppRequests.stopTasks.id
-    LaunchedEffect(stopTasksRequestId) {
-        if (stopTasksRequestId <= 0) return@LaunchedEffect
-        clearToRoot()
-        mainPagerState.animateToPage(1)
-        viewModel.stopTasks()
-        AppRequests.stopTasks.consume()
     }
 }

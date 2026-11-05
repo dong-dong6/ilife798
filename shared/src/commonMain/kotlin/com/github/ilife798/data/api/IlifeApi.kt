@@ -10,10 +10,8 @@ import com.github.ilife798.data.model.DeviceSubState
 import com.github.ilife798.data.model.PayChannel
 import com.github.ilife798.data.model.PayChannelType
 import com.github.ilife798.data.model.PointsInfo
-import com.github.ilife798.data.model.RechargeProduct
 import com.github.ilife798.data.model.RefundProgress
 import com.github.ilife798.data.model.WalletAccount
-import com.github.ilife798.util.currentTimeMillis
 import io.ktor.client.HttpClient
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
@@ -22,11 +20,9 @@ import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
-import io.ktor.http.fromHttpToGmtDate
 import io.ktor.util.AttributeKey
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -93,16 +89,6 @@ class IlifeApi(
 
     // 接口返回非 0 业务码时回调服务端错误信息，供上层直接以 Toast 展示
     var onApiError: ((String) -> Unit)? = null
-    private var appTimeOffsetMillis = 0L
-
-    private fun calibrateAppTime(response: HttpResponse) {
-        if (response.call.request.headers["ApplicationType"] != APP_TYPE_DEVICE) return
-        response.headers["Date"]?.let { date ->
-            runCatching { date.fromHttpToGmtDate().timestamp }.getOrNull()?.let {
-                appTimeOffsetMillis = it - currentTimeMillis()
-            }
-        }
-    }
 
     private fun HttpRequestBuilder.scoreHeaders(
         token: String,
@@ -117,7 +103,6 @@ class IlifeApi(
         notifyExpiry: Boolean = true,
         reportError: Boolean = true,
     ): JsonObject {
-        calibrateAppTime(response)
         val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
         if (notifyExpiry) {
             checkSessionExpired(
@@ -146,74 +131,6 @@ class IlifeApi(
     private fun emitApiError(msg: String?) {
         val text = msg?.trim().orEmpty()
         if (text.isNotEmpty()) onApiError?.invoke(text)
-    }
-
-    // 图形验证码
-    suspend fun getCaptcha(key: String): ByteArray {
-        val timestamp = currentTimeMillis()
-        val response =
-            client.apiGet("captcha/") {
-                parameter("s", key)
-                parameter("r", timestamp)
-            }
-        return response.bodyAsBytes()
-    }
-
-    fun newCaptchaKey(): String {
-        val chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-        return (1..10).map { chars.random() }.joinToString("")
-    }
-
-    // 登录
-    suspend fun sendSmsCode(
-        phone: String,
-        graphCode: String,
-        captchaKey: String,
-        isAlipay: Boolean = false,
-    ): String =
-        try {
-            val response =
-                client.apiPost("acc/login/code") {
-                    header("ApplicationType", if (isAlipay) APP_TYPE_POINTS else APP_TYPE_DEVICE)
-                    header("VersionCode", if (isAlipay) ApiConfig.MINI_LOGIN_VERSION else ApiConfig.VERSION_CODE)
-                    contentType(ContentType.Application.Json)
-                    setBody(requestJson.encodeToString(SmsCodeRequest(phone, graphCode, captchaKey)))
-                }
-            calibrateAppTime(response)
-            response.bodyAsText()
-        } catch (e: Exception) {
-            """{"code":-1,"msg":"${e.message}"}"""
-        }
-
-    suspend fun login(
-        phone: String,
-        smsCode: String,
-        isAlipay: Boolean,
-    ): LoginResult {
-        val appType = if (isAlipay) APP_TYPE_POINTS else APP_TYPE_DEVICE
-        val response =
-            client.apiPost(if (isAlipay) "acc/login" else "acc/login?sign=${Signer.login(phone, smsCode)}") {
-                contentType(ContentType.Application.Json)
-                setBody(
-                    if (isAlipay) {
-                        requestJson.encodeToString(LoginRequest(authCode = smsCode, un = phone, cid = ApiConfig.cid))
-                    } else {
-                        JsonObject(
-                            mapOf("authCode" to JsonPrimitive(smsCode), "un" to JsonPrimitive(phone)),
-                        ).toString()
-                    },
-                )
-                header("ApplicationType", appType)
-                header("VersionCode", if (isAlipay) ApiConfig.MINI_LOGIN_VERSION else ApiConfig.VERSION_CODE)
-            }
-        calibrateAppTime(response)
-        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
-        val code = body.int("code", -1)
-        if (code != 0) return LoginResult(false, error = body.str("msg", "登录失败"))
-        val al = body.obj("data")?.obj("al")
-        val token = al?.str("token") ?: ""
-        val uid = al?.str("uid") ?: ""
-        return LoginResult(true, token = token, uid = uid)
     }
 
     // 账号信息
@@ -268,7 +185,7 @@ class IlifeApi(
         return TokenProbe(appValid = appInfo != null, mainValid = mainValid, uid = appInfo?.id ?: "", platform = platform)
     }
 
-    // 渠道判定：取任务列表 stype 的交集，只剩 {1} 为设备控制、只剩 {5} 为积分任务，
+    // 渠道判定：取任务列表 stype 的交集，只剩 {1} 为设备控制、只剩 {5} 为积分查询，
     // 交集冲突/字段缺失/接口失败均判为无法确定
     private fun missionPlatform(body: JsonObject): TokenPlatform {
         val missions = body.obj("data")?.arr("missions")
@@ -333,75 +250,6 @@ class IlifeApi(
     }
 
     // 修改昵称：acc/upt 的 name 分支，type=1
-    suspend fun modifyName(
-        token: String,
-        name: String,
-        appType: String = APP_TYPE_DEVICE,
-    ): DevResult =
-        submitUserInfo(
-            token = token,
-            body =
-                ModifyUserInfoRequest(
-                    name = name,
-                    newPayPwd = "",
-                    oriPayPwd = "",
-                    type = ModifyUserInfoType.NAME,
-                ),
-            appType = appType,
-        )
-
-    // 交易密码第一步：校验原密码是否通过，type=2
-    suspend fun verifyPayPwd(
-        token: String,
-        oriPayPwd: String,
-        appType: String = APP_TYPE_DEVICE,
-    ): DevResult =
-        submitUserInfo(
-            token = token,
-            body =
-                ModifyUserInfoRequest(
-                    name = "",
-                    newPayPwd = oriPayPwd,
-                    oriPayPwd = oriPayPwd,
-                    type = ModifyUserInfoType.ORI_PAY_PWD,
-                ),
-            appType = appType,
-        )
-
-    // 交易密码第二步：校验通过后写新密码，type=3
-    suspend fun changePayPwd(
-        token: String,
-        oriPayPwd: String,
-        newPayPwd: String,
-        appType: String = APP_TYPE_DEVICE,
-    ): DevResult =
-        submitUserInfo(
-            token = token,
-            body =
-                ModifyUserInfoRequest(
-                    name = "",
-                    newPayPwd = newPayPwd,
-                    oriPayPwd = oriPayPwd,
-                    type = ModifyUserInfoType.PAY_PWD,
-                ),
-            appType = appType,
-        )
-
-    private suspend fun submitUserInfo(
-        token: String,
-        body: ModifyUserInfoRequest,
-        appType: String,
-    ): DevResult {
-        val response =
-            client.apiPost("acc/upt") {
-                contentType(ContentType.Application.Json)
-                setBody(requestJson.encodeToString(body))
-                apiHeaders(token, appType)
-            }
-        return parseDevResult(response.bodyAsText(), reportError = false, token = token)
-    }
-
-    // 设备
     suspend fun getMasterDevices(
         token: String,
         appType: String = APP_TYPE_DEVICE,
@@ -626,156 +474,6 @@ class IlifeApi(
         return PointsInfo(data.intOrNull("validScore"), data.intOrNull("totalScore"))
     }
 
-    suspend fun getMissionList(
-        token: String,
-        isApp: Boolean = true,
-    ): MissionListResult {
-        val response =
-            client.apiGet("acc/score/mission-lst") {
-                scoreHeaders(token, isApp)
-            }
-        val body = bodyJson(response)
-        check(body.intOrNull("code") == 0) { "任务列表查询失败" }
-        val data = checkNotNull(body.obj("data")) { "任务列表响应不完整" }
-        val summaryResponse = client.apiGet("acc/score/acc-score") { scoreHeaders(token, isApp) }
-        val summaryBody = bodyJson(summaryResponse, reportError = false)
-        check(summaryBody.intOrNull("code") == 0) { "无法核验任务进度" }
-        val accScore = checkNotNull(summaryBody.obj("data")) { "缺少账户积分进度" }
-        val validScore = accScore.intOrNull("validScore")
-        val totalScore = accScore.intOrNull("totalScore")
-        val weekMask = accScore.obj("daily")?.intOrNull("week") ?: 0
-        val dailyRsp = data.obj("dailyRSP")
-        val dailyAdId = dailyRsp?.str("adId") ?: ""
-        val dailyScore = dailyRsp?.intOrNull("score") ?: 5
-
-        // -1 表示今日已达上限；其余异常进度不能当成 0 次继续提交。
-        val limitsArray =
-            if (accScore["limits"] == null ||
-                accScore["limits"] == JsonNull
-            ) {
-                emptyList()
-            } else {
-                checkNotNull(accScore.arr("limits")) { "任务进度格式错误" }
-            }
-        val dailyDoneMap = mutableMapOf<String, Int>()
-        for (item in limitsArray) {
-            val obj = item.jsonObject
-            val refId = obj.str("refId")
-            val limit = checkNotNull(obj.intOrNull("limit")) { "缺少任务完成次数" }
-            check(refId.isNotBlank() && limit >= -1) { "任务完成次数无效" }
-            dailyDoneMap[refId] = limit
-        }
-
-        val missions =
-            data.arr("missions") ?: return MissionListResult(
-                emptyList(),
-                validScore,
-                weekMask,
-                dailyAdId,
-                dailyScore,
-                totalScore,
-            )
-        val seen = mutableSetOf<String>()
-        val list =
-            missions.mapNotNull { item ->
-                val obj = item.jsonObject
-                val refId = obj.str("refId")
-                if (refId.isBlank() || !seen.add(refId)) return@mapNotNull null
-                val score = obj.int("score")
-                val limit = obj.int("limit")
-                if (limit <= 0) return@mapNotNull null
-                val rawDone = dailyDoneMap[refId]
-                MissionDto(
-                    adId = refId,
-                    name = obj.strOrNull("name") ?: obj.strOrNull("title") ?: "任务",
-                    score = score,
-                    limit = limit,
-                    dailyCompleted =
-                        when {
-                            rawDone == null -> 0
-                            rawDone < 0 -> limit
-                            else -> rawDone
-                        },
-                )
-            }
-
-        val allMissions =
-            if (dailyAdId.isNotBlank()) {
-                listOf(MissionDto(adId = dailyAdId, name = "每日签到", score = dailyScore, limit = 1, isDailySignin = true)) + list
-            } else {
-                list
-            }
-
-        return MissionListResult(allMissions, validScore, weekMask, dailyAdId, dailyScore, totalScore)
-    }
-
-    suspend fun executeMission(
-        token: String,
-        uid: String,
-        adId: String,
-        score: Int,
-        isApp: Boolean,
-    ): DevResult =
-        postScoreSend(
-            token,
-            uid,
-            adId,
-            JsonObject(
-                buildMap {
-                    put("adId", JsonPrimitive(adId))
-                    put("type", JsonPrimitive(101))
-                    if (isApp) {
-                        put("addScore", JsonPrimitive(score))
-                        put("addScoreType", JsonPrimitive(if (adId == "1705776998") 2 else 4))
-                    }
-                },
-            ).toString(),
-            isApp,
-        )
-
-    suspend fun signIn(
-        token: String,
-        uid: String,
-        weekDay: Int,
-        adId: String,
-        score: Int,
-        isApp: Boolean,
-    ): DevResult =
-        postScoreSend(
-            token,
-            uid,
-            adId,
-            JsonObject(
-                buildMap {
-                    put(if (isApp) "weekday" else "weekDay", JsonPrimitive(weekDay))
-                    put("adId", JsonPrimitive(adId))
-                    if (isApp) {
-                        put("addScore", JsonPrimitive(score))
-                        put("addScoreType", JsonPrimitive(1))
-                    }
-                },
-            ).toString(),
-            isApp,
-        )
-
-    // 执行任务与签到共用的 score-send 请求
-    private suspend fun postScoreSend(
-        token: String,
-        uid: String,
-        adId: String,
-        body: String,
-        isApp: Boolean,
-    ): DevResult {
-        val sign = Signer.task(adId, token, uid, isApp, currentTimeMillis() + if (isApp) appTimeOffsetMillis else 0L)
-        val response =
-            client.apiPost("acc/score/score-send?sign=$sign${if (isApp) "&s=1" else ""}") {
-                contentType(ContentType.Application.Json)
-                setBody(body)
-                scoreHeaders(token, isApp)
-            }
-        return parseDevResult(response.bodyAsText(), reportError = false, token = token)
-    }
-
     suspend fun getScoreList(
         token: String,
         page: Int = 0,
@@ -911,78 +609,6 @@ class IlifeApi(
         return BillListResult(records, total)
     }
 
-    suspend fun getRechargeProducts(
-        token: String,
-        eid: String,
-    ): List<RechargeProduct> {
-        if (eid.isEmpty()) return emptyList()
-        val response =
-            client.apiGet("prd/lst") {
-                parameter("eid", eid)
-                parameter("type", "1")
-                parameter("status", "1")
-                parameter("all", "false")
-                parameter("did", "")
-                parameter("page", "0")
-                parameter("size", "100")
-                parameter("hasCount", "false")
-                apiHeaders(token, APP_TYPE_DEVICE)
-            }
-        val body = bodyJson(response)
-        val data = body.arr("data") ?: return emptyList()
-        return data
-            .mapNotNull { item ->
-                val obj = item as? JsonObject ?: return@mapNotNull null
-                val id = obj.str("id")
-                if (id.isEmpty()) return@mapNotNull null
-                RechargeProduct(
-                    id = id,
-                    name = obj.str("name", "充值"),
-                    price = obj.double("curPrice"),
-                    originalPrice = obj.double("ogiPrice"),
-                )
-            }.distinctBy { "${it.name}|${it.price}|${it.originalPrice}" }
-    }
-
-    suspend fun createRechargeOrder(
-        token: String,
-        eid: String,
-        ownerId: String,
-        productId: String,
-    ): String? {
-        if (eid.isEmpty() || ownerId.isEmpty() || productId.isEmpty()) return null
-        val order =
-            CreateRechargeOrderRequest(
-                contact = EndpointRef(ownerId),
-                ep = EndpointRef(eid),
-                owner = EndpointRef(ownerId),
-                prds = listOf(ProductRef(productId, count = 1)),
-            )
-        val response =
-            client.apiPost("bill/save") {
-                contentType(ContentType.Application.Json)
-                setBody(requestJson.encodeToString(order))
-                apiHeaders(token, APP_TYPE_DEVICE)
-            }
-        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
-        checkSessionExpired(body, token)
-        if (body.intOrNull("code") != 0) {
-            emitApiError(body.strOrNull("msg"))
-            return null
-        }
-        return body.strOrNull("data")?.takeIf { it.isNotEmpty() && it != "null" }
-    }
-
-    /**
-     * 查询某个账单可用的支付渠道（`GET /api/v1/bill/pay/channels?id={billId}`）。
-     *
-     * 官方在此之后还会用 6 项硬编码白名单过滤一遍，过滤后为空就提示「没有可用的支付方式」。
-     * 本端沿用同样的过滤，且只返回本端实现过的渠道（见 `PayChannelType.SUPPORTED`），
-     * 云闪付/农行这类没有 SDK 的取值直接丢弃，不在界面上留下点不动的条目。
-     *
-     * 返回 null 表示接口调用失败（网络/服务端错误），返回空列表表示服务端明确没给渠道。
-     * 两者触发的原因不同，上层提示文案也不同。
-     */
     suspend fun getPayChannels(
         token: String,
         orderId: String,
@@ -1076,52 +702,6 @@ class IlifeApi(
     }
 
     // 钱包退款：POST /acc/wallet/refund，type=23（支付宝小程序，与官方 RefundActivity 一致）
-    suspend fun refundWallet(
-        token: String,
-        eid: String,
-    ): DevResult {
-        if (eid.isEmpty()) return DevResult(false, -1, "钱包信息缺失")
-        val response =
-            client.apiPost("acc/wallet/refund") {
-                contentType(ContentType.Application.Json)
-                setBody(requestJson.encodeToString(RefundWalletRequest(eid)))
-                apiHeaders(token, APP_TYPE_DEVICE)
-            }
-        return parseDevResult(response.bodyAsText(), token = token)
-    }
-
-    // 积分兑换：将积分兑换为指定钱包余额，成功返回账单号用于核验结果
-    suspend fun exchangeScore(
-        token: String,
-        endpointId: String,
-        score: Int,
-    ): String? {
-        if (endpointId.isEmpty() || score <= 0) return null
-        val response =
-            client.apiPost("acc/score/score-use") {
-                contentType(ContentType.Application.Json)
-                setBody(requestJson.encodeToString(ExchangeScoreRequest(EndpointRef(endpointId), score)))
-                apiHeaders(token, APP_TYPE_DEVICE)
-            }
-        val body = json.parseToJsonElement(response.bodyAsText()).jsonObject
-        checkSessionExpired(body, token)
-        if (body.intOrNull("code") != 0) {
-            emitApiError(body.strOrNull("msg"))
-            return null
-        }
-        return body.obj("data")?.strOrNull("sn")?.takeIf { it.isNotEmpty() && it != "null" }
-    }
-
-    // 核验兑换账单是否已完成（status=3），复用账单详情解析
-    suspend fun isExchangeBillCompleted(
-        token: String,
-        billId: String,
-    ): Boolean {
-        val bill = getBillDetail(token, billId) ?: return false
-        return bill.id == billId && bill.status == 3
-    }
-
-    // 账单详情（bill/view-full：data.bill + data.cnt）
     suspend fun getBillDetail(
         token: String,
         billId: String,
@@ -1207,83 +787,6 @@ class IlifeApi(
     // 绑定云卡（ic/bind：body CardBindParm）。
     // 返回服务端 code：0 = 成功，-15 = 该卡需要「绑卡密钥」。
     // 官方 ModifyCardActivity 即按两段式流程：首提被 -15 驳回后显示密钥输入框，用户补填再提一次。
-    suspend fun bindCard(
-        token: String,
-        cardId: String,
-        cardToken: String,
-        name: String,
-    ): Int {
-        val response =
-            client.apiPost("ic/bind") {
-                contentType(ContentType.Application.Json)
-                setBody(
-                    requestJson.encodeToString(
-                        CardBindRequest(id = cardId, name = name, token = cardToken),
-                    ),
-                )
-                apiHeaders(token, APP_TYPE_DEVICE)
-            }
-        return bodyJson(response).intOrNull("code") ?: CODE_UNKNOWN
-    }
-
-    // 修改云卡（ic/upt：body CardBindParm）
-    suspend fun updateCard(
-        token: String,
-        cardId: String,
-        cardToken: String,
-        name: String,
-        limit: Double,
-        otherEp: Int,
-    ): Boolean {
-        val response =
-            client.apiPost("ic/upt") {
-                contentType(ContentType.Application.Json)
-                setBody(
-                    requestJson.encodeToString(
-                        CardBindRequest(
-                            id = cardId,
-                            name = name,
-                            token = cardToken,
-                            limit = limit,
-                            otherEp = otherEp,
-                        ),
-                    ),
-                )
-                apiHeaders(token, APP_TYPE_DEVICE)
-            }
-        return bodyJson(response).intOrNull("code") == 0
-    }
-
-    // 解绑/挂失云卡（ic/unbind：body {"id": 卡ID}）
-    suspend fun unbindCard(
-        token: String,
-        cardId: String,
-    ): Boolean {
-        if (cardId.isEmpty()) return false
-        val response =
-            client.apiPost("ic/unbind") {
-                contentType(ContentType.Application.Json)
-                setBody(requestJson.encodeToString(CardRefRequest(id = cardId)))
-                apiHeaders(token, APP_TYPE_DEVICE)
-            }
-        return bodyJson(response).intOrNull("code") == 0
-    }
-
-    // 激活云卡（ic/valid：body {"id": 卡ID}），云卡需每 12 小时激活一次
-    suspend fun validCard(
-        token: String,
-        cardId: String,
-    ): Boolean {
-        if (cardId.isEmpty()) return false
-        val response =
-            client.apiPost("ic/valid") {
-                contentType(ContentType.Application.Json)
-                setBody(requestJson.encodeToString(CardRefRequest(id = cardId)))
-                apiHeaders(token, APP_TYPE_DEVICE)
-            }
-        return bodyJson(response).intOrNull("code") == 0
-    }
-
     private fun parseCloudCard(obj: JsonObject): CloudCard {
         val holder = obj.obj("holder")
         val ep = obj.obj("ep")

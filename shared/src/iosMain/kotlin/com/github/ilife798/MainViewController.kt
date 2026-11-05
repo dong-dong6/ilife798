@@ -13,10 +13,6 @@ fun MainViewController(): UIViewController {
     AppStorage.instance = PersistentStorage()
     ApiConfig.init(
         gateway = IosBuildConfig.API_GATEWAY,
-        salt = IosBuildConfig.SIGN_SALT,
-        clientId = IosBuildConfig.API_CID,
-        appSalt = IosBuildConfig.APP_SIGN_SALT,
-        miniSalt = IosBuildConfig.MINI_SIGN_SALT,
     )
     return ComposeUIViewController { App() }
 }

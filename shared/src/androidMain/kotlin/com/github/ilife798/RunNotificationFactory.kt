@@ -16,8 +16,6 @@ internal const val DEVICE_ID_RANGE = 900
 internal const val RUN_NOTIFICATION_ID = 2001
 
 private const val REQUEST_DEVICE_CONTENT = 4101
-private const val REQUEST_TASK_CONTENT = 4103
-private const val REQUEST_STOP_TASKS = 4104
 private const val REQUEST_STOP_DEVICE_BASE = 4200
 private const val REQUEST_STOP_DEVICE_RANGE = 500
 
@@ -51,47 +49,6 @@ internal fun buildDeviceNotification(
             .setShowWhen(false)
             .setOngoing(true)
     builder.addAction(stopDeviceAction(context, deviceId))
-    applyRunProgress(builder)
-    return builder.build()
-}
-
-internal fun buildTaskNotification(
-    context: Context,
-    gained: Int,
-): Notification {
-    val stopIntent =
-        activityPendingIntent(
-            context,
-            REQUEST_STOP_TASKS,
-            IntentActions.ACTION_STOP_TASKS,
-            deviceId = null,
-        )
-    val builder =
-        Notification
-            .Builder(context, CHANNEL_TASK)
-            .setSmallIcon(com.github.ilife798.shared.R.drawable.ic_notify_task)
-            .setContentTitle("积分任务运行中")
-            .setContentText("已获得 $gained 积分")
-            .setContentIntent(
-                activityPendingIntent(
-                    context,
-                    REQUEST_TASK_CONTENT,
-                    IntentActions.ACTION_OPEN_TASKS,
-                    deviceId = null,
-                ),
-            ).setCategory(Notification.CATEGORY_PROGRESS)
-            .setGroup(RUN_NOTIFICATION_GROUP)
-            .setOnlyAlertOnce(true)
-            .setShowWhen(false)
-            .setOngoing(true)
-            .addAction(
-                Notification.Action
-                    .Builder(
-                        Icon.createWithResource(context, android.R.drawable.ic_menu_close_clear_cancel),
-                        "停止",
-                        stopIntent,
-                    ).build(),
-            )
     applyRunProgress(builder)
     return builder.build()
 }

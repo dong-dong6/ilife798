@@ -37,7 +37,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 账户凭证登录页。用户直接粘贴已有登录信息，跳过短信验证码流程。
  *
  * 两个输入框对应 [com.github.ilife798.data.model.Account] 的两个独立凭据槽位：
- * 设备控制（appToken，必填）与积分任务（token，可选）。提交后由 ViewModel
+ * 设备控制（appToken，必填）与积分查询（token，可选）。提交后由 ViewModel
  * 校验有效性并确认两条凭据属于同一账户。
  */
 @Composable
@@ -55,7 +55,7 @@ fun TokenLoginPage(
     val scrollBehavior = MiuixScrollBehavior()
     val blurBackdrop = rememberAppBlurBackdrop(viewModel.state.appBlur)
 
-    // 登录成功后账号会带上凭据，据此自动返回上一页，与手机号登录页行为一致
+    // 凭据校验成功并切换账号后返回上一页。
     val initialAccount = remember { viewModel.state.account }
     val loginDone =
         viewModel.state.account != initialAccount &&
@@ -104,7 +104,7 @@ fun TokenLoginPage(
                         value = pointsToken,
                         onValueChange = { pointsToken = it },
                         modifier = Modifier.fillMaxWidth(),
-                        label = "积分任务（可选）",
+                        label = "积分查询（可选）",
                     )
                 }
             }
@@ -114,7 +114,7 @@ fun TokenLoginPage(
                 colors = CardDefaults.defaultColors(color = MiuixTheme.colorScheme.surfaceContainer),
             ) {
                 Text(
-                    text = "登录信息即账号凭据，填写后由本机校验有效性并保存，不会上传到其它位置。",
+                    text = "填写已有的设备控制和积分查询凭据。凭据用于连接业务网关验证和使用，并保存在本机。",
                     style = MiuixTheme.textStyles.body2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     modifier = Modifier.padding(16.dp),

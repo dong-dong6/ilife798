@@ -49,13 +49,9 @@ import com.github.ilife798.ui.page.device.DeviceDetailPage
 import com.github.ilife798.ui.page.device.QrScannerPage
 import com.github.ilife798.ui.page.home.HomePage
 import com.github.ilife798.ui.page.license.LicensePage
-import com.github.ilife798.ui.page.login.LoginMethodPage
-import com.github.ilife798.ui.page.login.LoginPage
 import com.github.ilife798.ui.page.login.TokenLoginPage
-import com.github.ilife798.ui.page.me.CardBagPage
 import com.github.ilife798.ui.page.me.MePage
 import com.github.ilife798.ui.page.score.ScorePage
-import com.github.ilife798.ui.page.tasks.TasksPage
 import com.github.ilife798.ui.theme.appBarBlur
 import com.github.ilife798.ui.theme.blurAppBarColor
 import com.github.ilife798.ui.theme.captureForBlur
@@ -73,7 +69,6 @@ import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.extended.Contacts
 import top.yukonga.miuix.kmp.icon.extended.Home
-import top.yukonga.miuix.kmp.icon.extended.ListView
 import top.yukonga.miuix.kmp.nav.core.LocalNavTransitionScope
 import top.yukonga.miuix.kmp.nav.core.NavCornerClipMode
 import top.yukonga.miuix.kmp.nav.core.NavDisplay
@@ -97,7 +92,6 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 private val tabs =
     listOf(
         NavigationItem("首页", MiuixIcons.Home),
-        NavigationItem("任务", MiuixIcons.ListView),
         NavigationItem("我的", MiuixIcons.Contacts),
     )
 
@@ -283,21 +277,12 @@ private fun HomePagerPage(
         }
 
         1 -> {
-            TasksPage(
-                viewModel = viewModel,
-                onLoginClick = { isAlipay -> navigate(Page.Login(isAlipay = isAlipay)) },
-                bottomPadding = bottomPadding,
-            )
-        }
-
-        2 -> {
             MePage(
                 viewModel = viewModel,
-                onLoginClick = { navigate(Page.LoginMethod) },
+                onLoginClick = { navigate(Page.TokenLogin) },
                 onScoreClick = { navigate(Page.Score) },
                 onAccountClick = { navigate(Page.Account) },
                 onBillClick = { navigate(Page.Bill) },
-                onCardBagClick = { navigate(Page.CardBag) },
                 onLicenseClick = { navigate(Page.License) },
                 onBackupClick = { navigate(Page.Backup) },
                 bottomPadding = bottomPadding,
@@ -372,7 +357,7 @@ fun MainScaffold(viewModel: AppViewModel) {
 
     val interceptPredictiveBack = !predictiveBackEnabled && backStack.size > 1
 
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val pagerState = rememberPagerState(pageCount = { tabs.size })
     val coroutineScope = rememberCoroutineScope()
     val mainPagerState = rememberMainPagerState(pagerState, coroutineScope)
     val navBarBackdrop = rememberAppBlurBackdrop(viewModel.state.appBlur)
@@ -407,10 +392,6 @@ fun MainScaffold(viewModel: AppViewModel) {
             }
 
             1 -> {
-                viewModel.loadMissions()
-            }
-
-            2 -> {
                 viewModel.loadAccountInfo()
             }
         }
@@ -507,26 +488,6 @@ fun MainScaffold(viewModel: AppViewModel) {
                     }
                 }
             }
-            entry<Page.Login>(transition = detailTransition) { key ->
-                NavEntry(interceptPredictiveBack, onBack) {
-                    LoginPage(
-                        viewModel = viewModel,
-                        isAlipay = key.isAlipay,
-                        switchAccount = key.switchAccount,
-                        onBack = onBack,
-                    )
-                }
-            }
-            entry<Page.LoginMethod>(transition = detailTransition) {
-                NavEntry(interceptPredictiveBack, onBack) {
-                    LoginMethodPage(
-                        viewModel = viewModel,
-                        onPhoneLogin = { navigate(Page.Login(switchAccount = true)) },
-                        onCredentialLogin = { navigate(Page.TokenLogin) },
-                        onBack = onBack,
-                    )
-                }
-            }
             entry<Page.TokenLogin>(transition = detailTransition) {
                 NavEntry(interceptPredictiveBack, onBack) {
                     TokenLoginPage(
@@ -548,7 +509,7 @@ fun MainScaffold(viewModel: AppViewModel) {
                     AccountPage(
                         viewModel = viewModel,
                         onBack = onBack,
-                        onLoginClick = { navigate(Page.LoginMethod) },
+                        onLoginClick = { navigate(Page.TokenLogin) },
                     )
                 }
             }
@@ -602,26 +563,6 @@ fun MainScaffold(viewModel: AppViewModel) {
                         onBack = onBack,
                         onResult = { raw ->
                             viewModel.submitScannedRaw(raw)
-                            onBack()
-                        },
-                    )
-                }
-            }
-            entry<Page.CardBag>(transition = detailTransition) {
-                NavEntry(interceptPredictiveBack, onBack) {
-                    CardBagPage(
-                        viewModel = viewModel,
-                        onScannerRequest = { navigate(Page.CardScan) },
-                        onBack = onBack,
-                    )
-                }
-            }
-            entry<Page.CardScan>(transition = detailTransition) {
-                NavEntry(interceptPredictiveBack, onBack) {
-                    QrScannerPage(
-                        onBack = onBack,
-                        onResult = { raw ->
-                            viewModel.submitCardScannedRaw(raw)
                             onBack()
                         },
                     )

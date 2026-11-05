@@ -96,16 +96,6 @@ data class PointsInfo(
     val total: Int? = null,
 )
 
-data class MissionInfo(
-    val adId: String = "",
-    val name: String = "",
-    val score: Int = 0,
-    val limit: Int = 1,
-    val dailyCompleted: Int = 0,
-    val isDailySignin: Boolean = false,
-    val sourceToken: String = "",
-)
-
 data class ScoreRecord(
     val score: Int = 0,
     val name: String = "",
@@ -308,8 +298,6 @@ data class AppState(
     val wallets: List<WalletAccount> = emptyList(),
     val activeWalletId: String = "",
     val billRecords: List<BillRecord> = emptyList(),
-    val taskCompleted: Boolean = false,
-    val taskLogs: List<String> = emptyList(),
     val dynamicColor: Boolean = true,
     val customColor: Boolean = true,
     val paletteStyle: PaletteStyle = PaletteStyle.TonalSpot,
@@ -319,6 +307,5 @@ data class AppState(
     val predictiveBackEnabled: Boolean = true,
     val themeMode: ThemeMode = ThemeMode.System,
     val accountInfo: AccountInfo = AccountInfo(),
-    val weekMask: Int = 0,
     val disclaimerAcknowledged: Boolean = false,
 )

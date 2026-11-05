@@ -1,42 +1,28 @@
 package com.github.ilife798.ui.page.account
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
 import com.github.ilife798.copyToClipboard
 import com.github.ilife798.data.model.Account
 import com.github.ilife798.data.viewmodel.AppViewModel
-import com.github.ilife798.showToast
 import com.github.ilife798.ui.component.AccountAvatar
 import com.github.ilife798.ui.component.BlurredTopAppBar
 import com.github.ilife798.ui.component.ConfirmDialog
 import com.github.ilife798.ui.component.PageScrollColumn
 import com.github.ilife798.ui.theme.rememberAppBlurBackdrop
-import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Button
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
@@ -49,7 +35,6 @@ import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.Contacts
 import top.yukonga.miuix.kmp.icon.extended.Import
 import top.yukonga.miuix.kmp.preference.RadioButtonLocation
 import top.yukonga.miuix.kmp.preference.RadioButtonPreference
@@ -60,7 +45,7 @@ private enum class CredentialField(
     val title: String,
 ) {
     APP_TOKEN("appToken", "设备控制"),
-    TOKEN("token", "积分任务"),
+    TOKEN("token", "积分查询"),
     UID("uid", "用户 ID"),
 }
 
@@ -83,7 +68,7 @@ private fun maskCredential(value: String): String {
 fun AccountPage(
     viewModel: AppViewModel,
     onBack: () -> Unit,
-    onLoginClick: (isAlipay: Boolean) -> Unit = {},
+    onLoginClick: () -> Unit = {},
 ) {
     val state = viewModel.state
     val account = state.account
@@ -95,11 +80,6 @@ fun AccountPage(
 
     var editingField by remember { mutableStateOf<CredentialField?>(null) }
     var inputValue by remember { mutableStateOf("") }
-    // 账号资料编辑：昵称与交易密码共用同一个弹窗状态机
-    var editingProfile by remember { mutableStateOf<ProfileEdit?>(null) }
-    var submitting by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-
     // 进入页面时校验其它账号有效性，过期的自动移除
     LaunchedEffect(Unit) {
         viewModel.validateAccounts()
@@ -110,22 +90,6 @@ fun AccountPage(
     ) { paddingValues ->
         PageScrollColumn(blurBackdrop, scrollBehavior, paddingValues) {
             if (accounts.isNotEmpty()) {
-                SmallTitle(text = "账号资料", insideMargin = PaddingValues(16.dp, 8.dp, 16.dp, 0.dp))
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column {
-                        BasicComponent(
-                            title = "昵称",
-                            summary = state.accountInfo.name.ifEmpty { "未设置" },
-                            onClick = { editingProfile = ProfileEdit.Name },
-                        )
-                        BasicComponent(
-                            title = "交易密码",
-                            summary = "修改账户钱包支付时使用的密码",
-                            onClick = { editingProfile = ProfileEdit.PayPassword },
-                        )
-                    }
-                }
-
                 SmallTitle(text = "账号列表", insideMargin = PaddingValues(16.dp, 8.dp, 16.dp, 0.dp))
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column {
@@ -154,7 +118,7 @@ fun AccountPage(
 
                 Button(
                     modifier = Modifier.fillMaxWidth(),
-                    onClick = { onLoginClick(false) },
+                    onClick = { onLoginClick() },
                     colors = ButtonDefaults.buttonColors(),
                 ) {
                     Icon(
@@ -202,7 +166,7 @@ fun AccountPage(
                         ),
                 ) {
                     Text(
-                        text = "设备控制/积分任务为空时点击输入，有值时点击复制，用户 ID 有值时点击复制。",
+                        text = "设备控制/积分查询为空时点击输入，有值时点击复制，用户 ID 有值时点击复制。",
                         style = MiuixTheme.textStyles.body2,
                         color = MiuixTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold,
@@ -233,72 +197,4 @@ fun AccountPage(
             )
         }
     }
-
-    val currentProfile = editingProfile
-    if (currentProfile != null) {
-        var nameInput by remember(currentProfile) {
-            mutableStateOf(
-                if (currentProfile == ProfileEdit.Name) state.accountInfo.name else "",
-            )
-        }
-        var oriPwdInput by remember(currentProfile) { mutableStateOf("") }
-        var newPwdInput by remember(currentProfile) { mutableStateOf("") }
-        ConfirmDialog(
-            title = currentProfile.title,
-            appBlur = state.appBlur,
-            confirmText = if (submitting) "提交中…" else "确定",
-            confirmEnabled = !submitting,
-            cancelEnabled = !submitting,
-            onDismiss = { if (!submitting) editingProfile = null },
-            onConfirm = {
-                if (submitting) return@ConfirmDialog
-                submitting = true
-                scope.launch {
-                    val result =
-                        when (currentProfile) {
-                            ProfileEdit.Name -> viewModel.modifyAccountName(nameInput)
-                            ProfileEdit.PayPassword -> viewModel.changePayPassword(oriPwdInput, newPwdInput)
-                        }
-                    submitting = false
-                    if (result.success) {
-                        editingProfile = null
-                    } else {
-                        showToast(result.message.ifEmpty { "操作失败，请稍后再试" })
-                    }
-                }
-            },
-        ) {
-            if (currentProfile == ProfileEdit.Name) {
-                TextField(
-                    value = nameInput,
-                    onValueChange = { nameInput = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "昵称",
-                )
-            } else {
-                TextField(
-                    value = oriPwdInput,
-                    onValueChange = { oriPwdInput = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "原交易密码",
-                    visualTransformation = PasswordVisualTransformation(),
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                TextField(
-                    value = newPwdInput,
-                    onValueChange = { newPwdInput = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "新交易密码",
-                    visualTransformation = PasswordVisualTransformation(),
-                )
-            }
-        }
-    }
-}
-
-private enum class ProfileEdit(
-    val title: String,
-) {
-    Name("修改昵称"),
-    PayPassword("修改交易密码"),
 }

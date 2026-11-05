@@ -149,10 +149,6 @@ class DeviceWidgetStartService : Service() {
         if (ApiConfig.baseUrl.isBlank()) {
             ApiConfig.init(
                 BuildConfig.API_GATEWAY,
-                BuildConfig.SIGN_SALT,
-                BuildConfig.API_CID,
-                BuildConfig.APP_SIGN_SALT,
-                BuildConfig.MINI_SIGN_SALT,
             )
         }
         val store = DeviceWidgetStore(this)

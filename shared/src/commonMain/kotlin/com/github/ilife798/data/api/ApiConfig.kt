@@ -8,10 +8,6 @@ const val APP_TYPE_POINTS = "1,5" // 积分登录及小程序积分请求渠道
 
 object ApiConfig {
     var baseUrl: String = ""
-    var signSalt: String = ""
-    var cid: String = ""
-    var appSignSalt: String = ""
-    var miniSignSalt: String = ""
     const val MINI_VERSION: String = "2.0.178"
     const val MINI_LOGIN_VERSION: String = "2.0.83"
     const val VERSION_CODE: String = "3.1.9"
@@ -23,17 +19,7 @@ object ApiConfig {
     const val REQUEST_TIMEOUT_MS: Long = 30_000
     const val SOCKET_TIMEOUT_MS: Long = 30_000
 
-    fun init(
-        gateway: String,
-        salt: String,
-        clientId: String,
-        appSalt: String = "",
-        miniSalt: String = "",
-    ) {
+    fun init(gateway: String) {
         baseUrl = gateway
-        signSalt = salt
-        cid = clientId
-        appSignSalt = appSalt
-        miniSignSalt = miniSalt
     }
 }

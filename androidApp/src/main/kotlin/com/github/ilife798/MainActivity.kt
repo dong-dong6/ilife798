@@ -28,10 +28,6 @@ class MainActivity : ComponentActivity() {
         DeviceWidgets.controller = AndroidDeviceWidgetController(applicationContext)
         ApiConfig.init(
             gateway = BuildConfig.API_GATEWAY,
-            salt = BuildConfig.SIGN_SALT,
-            clientId = BuildConfig.API_CID,
-            appSalt = BuildConfig.APP_SIGN_SALT,
-            miniSalt = BuildConfig.MINI_SIGN_SALT,
         )
 
         handleIntent(intent)
@@ -91,10 +87,6 @@ class MainActivity : ComponentActivity() {
                 intent.getStringExtra(IntentActions.EXTRA_DEVICE_ID)?.let { AppRequests.startDevice.request(it) }
             }
 
-            IntentActions.ACTION_RUN_TASKS -> {
-                AppRequests.runTasks.request()
-            }
-
             IntentActions.ACTION_SHOW_UPDATE -> {
                 AppRequests.showUpdate.request()
             }
@@ -105,14 +97,6 @@ class MainActivity : ComponentActivity() {
 
             IntentActions.ACTION_STOP_DEVICE -> {
                 intent.getStringExtra(IntentActions.EXTRA_DEVICE_ID)?.let { AppRequests.stopDevice.request(it) }
-            }
-
-            IntentActions.ACTION_OPEN_TASKS -> {
-                AppRequests.openTasks.request()
-            }
-
-            IntentActions.ACTION_STOP_TASKS -> {
-                AppRequests.stopTasks.request()
             }
         }
     }

@@ -43,7 +43,6 @@ import top.yukonga.miuix.kmp.basic.Scaffold
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.icon.MiuixIcons
-import top.yukonga.miuix.kmp.icon.extended.BankCards
 import top.yukonga.miuix.kmp.icon.extended.Contacts
 import top.yukonga.miuix.kmp.icon.extended.Create
 import top.yukonga.miuix.kmp.icon.extended.Hide
@@ -51,7 +50,6 @@ import top.yukonga.miuix.kmp.icon.extended.Import
 import top.yukonga.miuix.kmp.icon.extended.Notes
 import top.yukonga.miuix.kmp.icon.extended.Remove
 import top.yukonga.miuix.kmp.icon.extended.Show
-import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -61,7 +59,6 @@ fun MePage(
     onScoreClick: () -> Unit = {},
     onAccountClick: () -> Unit = {},
     onBillClick: () -> Unit = {},
-    onCardBagClick: () -> Unit = {},
     onLicenseClick: () -> Unit = {},
     onBackupClick: () -> Unit = {},
     bottomPadding: Dp,
@@ -80,7 +77,7 @@ fun MePage(
             topPadding = 4.dp,
             bottomPadding = bottomPadding,
         ) {
-            AccountSection(viewModel, onLoginClick, onScoreClick, onAccountClick, onBillClick, onCardBagClick)
+            AccountSection(viewModel, onLoginClick, onScoreClick, onAccountClick, onBillClick)
             SettingsSection(viewModel, onLicenseClick, onBackupClick, wideScreen)
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -94,7 +91,6 @@ private fun AccountSection(
     onScoreClick: () -> Unit,
     onAccountClick: () -> Unit,
     onBillClick: () -> Unit,
-    onCardBagClick: () -> Unit,
 ) {
     val account = viewModel.state.account
     val accountInfo = viewModel.state.accountInfo
@@ -237,22 +233,10 @@ private fun AccountSection(
                 ) {
                     Icon(
                         imageVector = MiuixIcons.Create,
-                        contentDescription = "积分",
+                        contentDescription = "积分历史",
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "积分")
-                }
-                Button(
-                    modifier = Modifier.weight(1f),
-                    onClick = onCardBagClick,
-                    colors = ButtonDefaults.buttonColors(),
-                ) {
-                    Icon(
-                        imageVector = MiuixIcons.BankCards,
-                        contentDescription = "卡包",
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(text = "卡包")
+                    Text(text = "积分历史")
                 }
             }
         }
