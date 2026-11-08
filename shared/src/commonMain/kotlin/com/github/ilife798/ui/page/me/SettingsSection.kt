@@ -72,7 +72,6 @@ internal fun SettingsSection(
     var showDisclaimerDialog by remember { mutableStateOf(false) }
     var showGithubProxyDialog by remember { mutableStateOf(false) }
     var showClearDeviceInfo by remember { mutableStateOf(false) }
-    var showSponsorDialog by remember { mutableStateOf(false) }
     // 选择弹窗与二次确认之间暂存待删除项，null 表示当前没有待确认的删除
     var pendingClear by remember { mutableStateOf<PendingClearSelection?>(null) }
     var versionTapCount by remember { mutableIntStateOf(0) }
@@ -241,24 +240,7 @@ internal fun SettingsSection(
                 summary = "查看使用本应用的免责声明",
                 onClick = { showDisclaimerDialog = true },
             )
-            ArrowPreference(
-                title = "赞助支持",
-                summary = "赞助维护者一杯水",
-                onClick = { showSponsorDialog = true },
-            )
         }
-    }
-
-    if (showSponsorDialog) {
-        SponsorSupportDialog(
-            appBlur = state.appBlur,
-            onDismiss = { showSponsorDialog = false },
-            onSelect = { target ->
-                // 选完先收起弹窗，再交给平台层打开外部浏览器
-                showSponsorDialog = false
-                viewModel.openSponsor(target.url)
-            },
-        )
     }
 
     if (showClearDeviceInfo) {

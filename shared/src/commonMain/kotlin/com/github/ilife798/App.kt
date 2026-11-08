@@ -8,7 +8,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.github.ilife798.data.viewmodel.AppViewModel
 import com.github.ilife798.pay.setWeChatFallbackAppId
 import com.github.ilife798.ui.component.DisclaimerDialog
-import com.github.ilife798.ui.component.SponsorDialog
 import com.github.ilife798.ui.navigation.MainScaffold
 import com.github.ilife798.ui.theme.AppTheme
 
@@ -43,17 +42,6 @@ fun App(weChatFallbackAppId: String = "") {
             DisclaimerDialog(
                 appBlur = state.appBlur,
                 onDismiss = { viewModel.acknowledgeDisclaimer() },
-            )
-        }
-
-        // 启动次数达标后的赞助提示
-        if (viewModel.sponsorPromptCount > 0) {
-            SponsorDialog(
-                appBlur = state.appBlur,
-                message = "您已启动应用 ${viewModel.sponsorPromptCount} 次了，考虑赞助支持一下吗？",
-                onDismiss = { viewModel.dismissSponsor() },
-                onNeverRemind = { viewModel.neverRemindSponsor() },
-                onSponsor = { viewModel.openSponsor() },
             )
         }
     }

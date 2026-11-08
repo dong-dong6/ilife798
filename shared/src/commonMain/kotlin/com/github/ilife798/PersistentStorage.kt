@@ -55,8 +55,6 @@ object StorageKeys {
     const val DEVELOPER_MODE = "setting_developer_mode"
     const val CHECK_UPDATE_ON_START = "setting_check_update_on_start"
     const val DISCLAIMER_SHOWN = "setting_disclaimer_shown"
-    const val LAUNCH_COUNT = "stats_launch_count"
-    const val SPONSOR_PROMPT_STOPPED = "setting_sponsor_prompt_stopped"
 }
 
 object AppStorage {
