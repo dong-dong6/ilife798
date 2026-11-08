@@ -131,7 +131,7 @@ jobs:
             ${{ env.APP_MODULE }}/build/outputs/apk/release/SHA256SUMS.txt
           if-no-files-found: error
       - name: Publish GitHub Release
-        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        if: (github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/v') || (github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, '[release]')))) || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
