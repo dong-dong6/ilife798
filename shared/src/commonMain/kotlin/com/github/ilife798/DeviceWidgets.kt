@@ -21,12 +21,23 @@ data class DeviceWidgetEntry(
 )
 
 enum class DeviceWidgetResult {
+    ADDED,
     REQUESTED,
     UNSUPPORTED,
     FAILED,
 }
 
 interface DeviceWidgetController {
+    fun setFavorite(
+        target: DeviceWidgetTarget,
+        followed: Boolean,
+    )
+
+    fun syncFavorites(
+        accountKey: String,
+        deviceIds: Set<String>,
+    )
+
     fun sync(
         accountKeys: Set<String>,
         entries: List<DeviceWidgetEntry>,

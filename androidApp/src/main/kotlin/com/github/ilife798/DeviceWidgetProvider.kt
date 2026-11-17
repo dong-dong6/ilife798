@@ -24,6 +24,22 @@ internal const val EXTRA_WIDGET_TARGET = "com.github.ilife798.extra.WIDGET_TARGE
 class AndroidDeviceWidgetController(
     private val context: Context,
 ) : DeviceWidgetController {
+    override fun setFavorite(
+        target: DeviceWidgetTarget,
+        followed: Boolean,
+    ) {
+        DeviceWidgetStore(context).setFavorite(target, followed)
+        DeviceWidgetProvider.updateAll(context)
+    }
+
+    override fun syncFavorites(
+        accountKey: String,
+        deviceIds: Set<String>,
+    ) {
+        DeviceWidgetStore(context).syncFavorites(accountKey, deviceIds)
+        DeviceWidgetProvider.updateAll(context)
+    }
+
     override fun sync(
         accountKeys: Set<String>,
         entries: List<DeviceWidgetEntry>,
@@ -36,8 +52,14 @@ class AndroidDeviceWidgetController(
             val manager = AppWidgetManager.getInstance(context)
             val store = DeviceWidgetStore(context)
             // 不支持应用内添加的桌面仍可从系统小组件列表选择此设备。
-            store.save(entry)
-            if (!manager.isRequestPinAppWidgetSupported) {
+            store.pin(entry)
+            val existing = manager.getAppWidgetIds(ComponentName(context, DeviceWidgetProvider::class.java))
+            if (existing.isNotEmpty()) {
+                store.bind(existing.first(), store.key(entry.target), entry.startArgs, entry.autoDeduct)
+                DeviceWidgetProvider.updateAll(context)
+                DeviceWidgetProvider.update(context, existing.first(), resetSelection = true)
+                DeviceWidgetResult.ADDED
+            } else if (!manager.isRequestPinAppWidgetSupported) {
                 DeviceWidgetResult.UNSUPPORTED
             } else {
                 val callback =

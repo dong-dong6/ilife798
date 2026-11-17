@@ -5,6 +5,8 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.github.ilife798.AppStorage
+import com.github.ilife798.DeviceWidgetTarget
+import com.github.ilife798.DeviceWidgets
 import com.github.ilife798.RunNotifications
 import com.github.ilife798.StorageKeys
 import com.github.ilife798.data.api.APP_TYPE_DEVICE
@@ -482,6 +484,7 @@ class DeviceController(
                     return@launch
                 }
                 val devices = master.devices
+                DeviceWidgets.controller?.syncFavorites(DeviceWidgets.accountKey(getState().account), devices.map { it.id }.toSet())
                 // 收藏到达后立即显示；逐台状态探测超时不应阻塞整个首页列表。
                 val favorites =
                     devices.map { dto ->
@@ -648,12 +651,14 @@ class DeviceController(
         deviceId: String,
         currentlyFollowed: Boolean,
     ) {
+        val accountKey = DeviceWidgets.accountKey(getState().account)
         val token = currentToken()
         if (token.isEmpty()) return
         scope.launch {
             try {
                 val result = api.devFavo(token, deviceId, remove = currentlyFollowed)
                 if (result.success) {
+                    DeviceWidgets.controller?.setFavorite(DeviceWidgetTarget(accountKey, deviceId), !currentlyFollowed)
                     onToast(if (currentlyFollowed) "取消收藏" else "收藏成功")
                     loadDeviceInfo(force = true)
                 }

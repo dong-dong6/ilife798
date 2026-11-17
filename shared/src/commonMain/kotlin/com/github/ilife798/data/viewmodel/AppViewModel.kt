@@ -388,6 +388,7 @@ class AppViewModel : ViewModel() {
                 ?: DeviceWidgetResult.UNSUPPORTED
         showToast(
             when (result) {
+                DeviceWidgetResult.ADDED -> "已添加到桌面小组件并切换到该设备"
                 DeviceWidgetResult.REQUESTED -> "请在系统弹窗中确认添加桌面小组件"
                 DeviceWidgetResult.UNSUPPORTED -> "请长按桌面，在小组件中选择 ILife798 设备"
                 DeviceWidgetResult.FAILED -> "添加失败，请重试或从桌面小组件列表添加"

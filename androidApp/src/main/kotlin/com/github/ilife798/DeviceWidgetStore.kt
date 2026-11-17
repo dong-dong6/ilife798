@@ -18,6 +18,48 @@ internal class DeviceWidgetStore(
 
     private fun snapshots(): JSONObject = runCatching { JSONObject(prefs.getString("entries", "{}") ?: "{}") }.getOrElse { JSONObject() }
 
+    fun setFavorite(
+        target: DeviceWidgetTarget,
+        followed: Boolean,
+    ) {
+        val key = key(target)
+        val removed = prefs.getStringSet("removed", emptySet()).orEmpty().toMutableSet()
+        if (followed) removed.remove(key) else removed.add(key)
+        val data = snapshots()
+        if (!followed) data.remove(key)
+        val pinned = prefs.getStringSet("pinned", emptySet()).orEmpty().toMutableSet()
+        if (!followed) pinned.remove(key)
+        prefs
+            .edit()
+            .putString("entries", data.toString())
+            .putStringSet("removed", removed)
+            .putStringSet("pinned", pinned)
+            .apply()
+    }
+
+    fun syncFavorites(
+        accountKey: String,
+        deviceIds: Set<String>,
+    ) {
+        if (accountKey.isBlank()) return
+        val data = snapshots()
+        val removed = prefs.getStringSet("removed", emptySet()).orEmpty().toMutableSet()
+        val pinned = prefs.getStringSet("pinned", emptySet()).orEmpty()
+        data.keys().asSequence().toList().forEach { key ->
+            val entry = read(data.optJSONObject(key))?.entry ?: return@forEach
+            if (entry.target.accountKey == accountKey && entry.target.deviceId !in deviceIds && key !in pinned) {
+                data.remove(key)
+                removed.add(key)
+            }
+        }
+        deviceIds.forEach { removed.remove(key(DeviceWidgetTarget(accountKey, it))) }
+        prefs
+            .edit()
+            .putString("entries", data.toString())
+            .putStringSet("removed", removed)
+            .apply()
+    }
+
     fun sync(
         accountKeys: Set<String>,
         entries: List<DeviceWidgetEntry>,
@@ -27,7 +69,8 @@ internal class DeviceWidgetStore(
         snapshots.keys().asSequence().toList().forEach { key ->
             if (snapshots.optJSONObject(key)?.optString("accountKey") !in accountKeys) snapshots.remove(key)
         }
-        entries.filter { it.target.accountKey in accountKeys }.forEach { entry -> put(snapshots, entry) }
+        val removed = prefs.getStringSet("removed", emptySet()).orEmpty()
+        entries.filter { it.target.accountKey in accountKeys && key(it.target) !in removed }.forEach { entry -> put(snapshots, entry) }
         if (before == snapshots.toString() && prefs.getStringSet("accounts", emptySet()) == accountKeys) return false
         prefs
             .edit()
@@ -38,6 +81,7 @@ internal class DeviceWidgetStore(
     }
 
     fun save(entry: DeviceWidgetEntry) {
+        if (key(entry.target) in prefs.getStringSet("removed", emptySet()).orEmpty()) return
         val snapshots = snapshots()
         put(snapshots, entry)
         val accounts = prefs.getStringSet("accounts", emptySet()).orEmpty().toSet() + entry.target.accountKey
@@ -46,6 +90,12 @@ internal class DeviceWidgetStore(
             .putString("entries", snapshots.toString())
             .putStringSet("accounts", accounts)
             .apply()
+    }
+
+    fun pin(entry: DeviceWidgetEntry) {
+        setFavorite(entry.target, true)
+        prefs.edit().putStringSet("pinned", prefs.getStringSet("pinned", emptySet()).orEmpty().toSet() + key(entry.target)).apply()
+        save(entry)
     }
 
     private fun put(
@@ -116,7 +166,7 @@ internal class DeviceWidgetStore(
 
     fun collection(widgetId: Int): List<StoredDeviceWidget> {
         val first = binding(widgetId) ?: return emptyList()
-        if (get(first) == null) return emptyList()
+        // 首选设备移除后继续展示其余设备；启动仍需校验目标是否在快照中。
         return entries().sortedWith(
             compareBy({
                 key(it.entry.target) != first
